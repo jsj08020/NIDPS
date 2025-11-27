@@ -31,13 +31,41 @@
     </div>
   </div>
 
+  <!-- 필터 영역 -->
+  <div class="w-11/12 max-w-5xl mb-3 flex flex-col md:flex-row gap-3 justify-between">
+    <div class="flex items-center gap-2">
+      <label class="text-sm text-gray-600">심각도</label>
+      <select id="severityFilter" class="border rounded px-2 py-1 text-sm">
+        <option value="ALL">전체</option>
+        <option value="심각">심각</option>
+        <option value="높음">높음</option>
+        <option value="중간">중간</option>
+        <option value="낮음">낮음</option>
+      </select>
+    </div>
+
+    <div class="flex items-center gap-2">
+      <label class="text-sm text-gray-600">공격 유형</label>
+      <select id="typeFilter" class="border rounded px-2 py-1 text-sm">
+        <option value="ALL">모든 유형</option>
+        <option value="포트 스캔">포트 스캔</option>
+        <option value="SYN플러드">SYN플러드</option>
+        <option value="SQL 인젝션">SQL 인젝션</option>
+        <option value="무차별 대입">무차별 대입</option>
+        <option value="DDOS">DDOS</option>
+      </select>
+    </div>
+  </div>
+
   <!-- 실시간 로그 박스 -->
   <div class="bg-white rounded-2xl shadow-md w-11/12 max-w-5xl p-6 mb-6">
-    <h2 class="text-xl font-semibold mb-4">📜 실시간 탐지 로그</h2>
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-xl font-semibold">📜 실시간 탐지 로그</h2>
       <button id="clearBtn"
-            class="px-3 py-2 mb-3 bg-red-500 text-white rounded text-sm">
+              class="px-3 py-2 bg-red-500 text-white rounded text-sm">
         로그 전체 삭제
       </button>
+    </div>
     <div id="logBox" class="font-mono text-sm text-left h-96 overflow-y-auto border-t pt-3"></div>
   </div>
 
@@ -78,12 +106,34 @@
   const selectedLogEl = document.getElementById("selectedLog");
   const analyzeBtn = document.getElementById("analyzeBtn");
 
+  const severityFilterEl = document.getElementById("severityFilter");
+  const typeFilterEl = document.getElementById("typeFilter");
+
   // 스크롤 자동 여부 감지
   logBox.addEventListener("scroll", () => {
     const tolerance = 1;
     autoScroll =
       Math.abs(logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight) <= tolerance;
   });
+
+  // 필터 적용
+  function applyFilters() {
+    const severityValue = severityFilterEl.value;
+    const typeValue = typeFilterEl.value;
+
+    document.querySelectorAll(".log-line").forEach(el => {
+      const s = el.dataset.severity || "정보";
+      const t = el.dataset.type || "기타";
+
+      const severityOk = (severityValue === "ALL") || (s === severityValue);
+      const typeOk = (typeValue === "ALL") || (t === typeValue);
+
+      el.style.display = (severityOk && typeOk) ? "" : "none";
+    });
+  }
+
+  severityFilterEl.addEventListener("change", applyFilters);
+  typeFilterEl.addEventListener("change", applyFilters);
 
   // 로그 클릭 시 선택 처리
   function handleLogClick(line, element) {
@@ -111,13 +161,43 @@
         const p = document.createElement("p");
         p.textContent = line;
         p.className = "log-line cursor-pointer hover:bg-gray-100";
+
+        // ----- 로그 텍스트에서 심각도 파싱 -----
+        // 포맷 예: [12:34:56] [심각] 메시지...
+        const matches = line.match(/\[(.*?)\]/g);
+        let severityLabel = "정보";
+        if (matches && matches.length >= 2) {
+          severityLabel = matches[1].replace("[", "").replace("]", "");
+        }
+        p.dataset.severity = severityLabel;
+
+        // 심각도에 따라 색상 적용
+        if (severityLabel === "심각") p.classList.add("text-red-700");
+        else if (severityLabel === "높음") p.classList.add("text-red-500");
+        else if (severityLabel === "중간") p.classList.add("text-orange-500");
+        else if (severityLabel === "낮음") p.classList.add("text-blue-500");
+
+        // ----- 공격 유형 태깅 (간단 매핑) -----
+        let attackType = "기타";
+
+        if (line.includes("비정상 Port")) {
+          attackType = "포트 스캔";
+        } else if (line.includes("트래픽 과다")) {
+          attackType = "DDOS";
+        } else if (line.includes("Ping 과다")) {
+          attackType = "SYN플러드";
+        }
+        // 나중에 SQL 인젝션/무차별 대입 탐지 추가하면 여기 분기만 더 넣으면 됨
+        p.dataset.type = attackType;
+
         p.addEventListener("click", () => handleLogClick(line, p));
         logBox.appendChild(p);
       });
 
+      // 너무 많으면 오래된 로그 제거
       if (logBox.children.length > 500) {
         for (let i = 0; i < 100; i++) {
-          logBox.removeChild(logBox.firstChild);
+          if (logBox.firstChild) logBox.removeChild(logBox.firstChild);
         }
       }
 
@@ -125,12 +205,19 @@
         logBox.scrollTop = logBox.scrollHeight;
       }
 
+      // 통계 업데이트
       document.getElementById("total").textContent = data.length;
-      document.getElementById("ping").textContent = data.filter(l => l.includes("Ping")).length;
-      document.getElementById("port").textContent = data.filter(l => l.includes("Port")).length;
-      document.getElementById("traffic").textContent = data.filter(l => l.includes("트래픽")).length;
+      document.getElementById("ping").textContent =
+        data.filter(l => l.includes("Ping 요청")).length;
+      document.getElementById("port").textContent =
+        data.filter(l => l.includes("비정상 Port 접근")).length;
+      document.getElementById("traffic").textContent =
+        data.filter(l => l.includes("트래픽 과다 발생")).length;
 
       lastLogs = data;
+
+      // 새 로그 생길 때마다 필터 다시 적용
+      applyFilters();
 
     } catch (err) {
       console.error("서버 연결 실패:", err);
@@ -166,11 +253,7 @@
 
   analyzeBtn.addEventListener("click", analyzeSelectedLog);
 
-  // 로그 주기적 갱신
-  fetchLogs();
-  setInterval(fetchLogs, 2000);
-
- // 🔥 로그 Clear 기능
+  // 🔥 로그 Clear 기능
   document.getElementById("clearBtn").addEventListener("click", async () => {
     if (!confirm("로그를 모두 삭제할까요?")) return;
 
@@ -180,7 +263,6 @@
       });
 
       if (!res.ok) {
-        // 상태코드 200이 아니면 에러 처리
         const text = await res.text();
         console.error("clear-logs 응답 에러:", res.status, text);
         alert("서버에서 에러 응답을 반환했습니다.");
@@ -200,6 +282,12 @@
         document.getElementById("port").textContent = 0;
         document.getElementById("traffic").textContent = 0;
 
+        // 선택 로그 및 분석 결과 초기화
+        selectedLog = null;
+        selectedLogEl.textContent = "(아직 선택된 로그 없음)";
+        document.getElementById("analysisBox").textContent = "아직 분석 결과 없음";
+        analyzeBtn.disabled = true;
+
         alert("로그가 초기화되었습니다!");
       } else {
         alert("오류 발생: " + result.message);
@@ -210,6 +298,9 @@
     }
   });
 
+  // 로그 주기적 갱신
+  fetchLogs();
+  setInterval(fetchLogs, 2000);
 </script>
 
 </body>
