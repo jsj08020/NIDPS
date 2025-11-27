@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>NIDPS 실시간 대시보드</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col items-center py-10">
+
+  <!-- 제목 -->
+  <h1 class="text-4xl font-bold text-blue-600 mb-10">NIDPS 보안 모니터링 시스템</h1>
+
+  <!-- 카드 영역 -->
+  <div id="stats" class="grid grid-cols-2 md:grid-cols-4 gap-6 w-11/12 max-w-5xl mb-8">
+    <div class="bg-white p-6 rounded-2xl shadow-md">
+      <p class="text-gray-400">전체 로그 수</p>
+      <p id="total" class="text-2xl font-semibold mt-2">-</p>
+    </div>
+    <div class="bg-white p-6 rounded-2xl shadow-md">
+      <p class="text-gray-400">Ping 탐지</p>
+      <p id="ping" class="text-2xl font-semibold mt-2 text-blue-500">-</p>
+    </div>
+    <div class="bg-white p-6 rounded-2xl shadow-md">
+      <p class="text-gray-400">비정상 접근</p>
+      <p id="port" class="text-2xl font-semibold mt-2 text-red-500">-</p>
+    </div>
+    <div class="bg-white p-6 rounded-2xl shadow-md">
+      <p class="text-gray-400">트래픽 과다</p>
+      <p id="traffic" class="text-2xl font-semibold mt-2 text-orange-500">-</p>
+    </div>
+  </div>
+
+  <!-- 로그 박스 -->
+  <div class="bg-white rounded-2xl shadow-md w-11/12 max-w-5xl p-6">
+    <h2 class="text-xl font-semibold mb-4">📜 실시간 탐지 로그</h2>
+    <div id="logBox" class="font-mono text-sm text-left h-96 overflow-y-auto border-t pt-3"></div>
+  </div>
+
+<script>
+  let lastLogs = [];
+  const logBox = document.getElementById("logBox");
+  let autoScroll = true; // 기본: 맨 아래 자동 스크롤 켜짐
+
+  // 사용자가 스크롤할 때 상태 감지
+  logBox.addEventListener("scroll", () => {
+    // 🔹 정말 '맨 아래'에 있는 경우만 true
+    const tolerance = 1; // 픽셀 오차 허용 범위
+    autoScroll = Math.abs(logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight) <= tolerance;
+  });
+
+  async function fetchLogs() {
+    try {
+      const res = await fetch("/api/logs");
+      const data = await res.json();
+
+      // 로그가 완전히 동일하면 갱신하지 않음
+      if (JSON.stringify(data) === JSON.stringify(lastLogs)) return;
+
+      // 기존 로그보다 길면 새 로그만 추가
+      const newLogs = data.slice(lastLogs.length);
+      newLogs.forEach(line => {
+        const p = document.createElement("p");
+        p.textContent = line;
+        logBox.appendChild(p);
+      });
+
+      // 너무 많으면 오래된 로그 제거
+      if (logBox.children.length > 500) {
+        for (let i = 0; i < 100; i++) {
+          logBox.removeChild(logBox.firstChild);
+        }
+      }
+
+      // 🔹 정말 맨 아래에 있을 때만 자동 스크롤
+      if (autoScroll) {
+        logBox.scrollTop = logBox.scrollHeight;
+      }
+
+      // 통계 업데이트
+      document.getElementById("total").textContent = data.length;
+      document.getElementById("ping").textContent = data.filter(l => l.includes("Ping")).length;
+      document.getElementById("port").textContent = data.filter(l => l.includes("Port")).length;
+      document.getElementById("traffic").textContent = data.filter(l => l.includes("트래픽")).length;
+
+      // 상태 업데이트
+      lastLogs = data;
+
+    } catch (err) {
+      console.error("서버 연결 실패:", err);
+    }
+  }
+
+  fetchLogs();
+  setInterval(fetchLogs, 2000);
+</script>
+
+
+
+
+</body>
+</html>
