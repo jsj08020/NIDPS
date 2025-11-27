@@ -5,6 +5,7 @@
   <title>NIDPS 실시간 대시보드</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
+
 <body class="bg-gray-100 min-h-screen flex flex-col items-center py-10">
 
   <!-- 제목 -->
@@ -30,59 +31,105 @@
     </div>
   </div>
 
-  <!-- 로그 박스 -->
-  <div class="bg-white rounded-2xl shadow-md w-11/12 max-w-5xl p-6">
+  <!-- 실시간 로그 박스 -->
+  <div class="bg-white rounded-2xl shadow-md w-11/12 max-w-5xl p-6 mb-6">
     <h2 class="text-xl font-semibold mb-4">📜 실시간 탐지 로그</h2>
+      <button id="clearBtn"
+            class="px-3 py-2 mb-3 bg-red-500 text-white rounded text-sm">
+        로그 전체 삭제
+      </button>
     <div id="logBox" class="font-mono text-sm text-left h-96 overflow-y-auto border-t pt-3"></div>
+  </div>
+
+  <!-- AI 분석 박스 -->
+  <div class="bg-white rounded-2xl shadow-md w-11/12 max-w-5xl p-6">
+    <div class="flex items-center justify-between mb-2">
+      <h2 class="text-xl font-semibold">🤖 AI 트래픽 분석 결과</h2>
+    </div>
+
+    <!-- 선택된 로그 표시 -->
+    <div class="mb-3">
+      <p class="text-xs text-gray-500">선택된 로그</p>
+      <div id="selectedLog"
+           class="text-xs text-gray-700 bg-gray-100 rounded px-2 py-1 mt-1 max-h-16 overflow-y-auto">
+        (아직 선택된 로그 없음)
+      </div>
+
+      <button id="analyzeBtn"
+              class="mt-3 px-4 py-2 bg-blue-600 text-white rounded text-sm disabled:opacity-40"
+              disabled>
+        선택한 로그 분석하기
+      </button>
+    </div>
+
+    <!-- 분석 결과 출력 -->
+    <div id="analysisBox"
+         class="font-mono text-sm text-left h-64 overflow-y-auto border-t pt-3 whitespace-pre-wrap">
+      아직 분석 결과 없음
+    </div>
   </div>
 
 <script>
   let lastLogs = [];
   const logBox = document.getElementById("logBox");
-  let autoScroll = true; // 기본: 맨 아래 자동 스크롤 켜짐
+  let autoScroll = true;
 
-  // 사용자가 스크롤할 때 상태 감지
+  let selectedLog = null;
+  const selectedLogEl = document.getElementById("selectedLog");
+  const analyzeBtn = document.getElementById("analyzeBtn");
+
+  // 스크롤 자동 여부 감지
   logBox.addEventListener("scroll", () => {
-    // 🔹 정말 '맨 아래'에 있는 경우만 true
-    const tolerance = 1; // 픽셀 오차 허용 범위
-    autoScroll = Math.abs(logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight) <= tolerance;
+    const tolerance = 1;
+    autoScroll =
+      Math.abs(logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight) <= tolerance;
   });
 
+  // 로그 클릭 시 선택 처리
+  function handleLogClick(line, element) {
+    selectedLog = line;
+    selectedLogEl.textContent = line;
+    analyzeBtn.disabled = false;
+
+    // 하이라이트 정리
+    document.querySelectorAll(".log-line").forEach(el => {
+      el.classList.remove("bg-blue-100");
+    });
+    element.classList.add("bg-blue-100");
+  }
+
+  // 로그 불러오기
   async function fetchLogs() {
     try {
       const res = await fetch("/api/logs");
       const data = await res.json();
 
-      // 로그가 완전히 동일하면 갱신하지 않음
       if (JSON.stringify(data) === JSON.stringify(lastLogs)) return;
 
-      // 기존 로그보다 길면 새 로그만 추가
       const newLogs = data.slice(lastLogs.length);
       newLogs.forEach(line => {
         const p = document.createElement("p");
         p.textContent = line;
+        p.className = "log-line cursor-pointer hover:bg-gray-100";
+        p.addEventListener("click", () => handleLogClick(line, p));
         logBox.appendChild(p);
       });
 
-      // 너무 많으면 오래된 로그 제거
       if (logBox.children.length > 500) {
         for (let i = 0; i < 100; i++) {
           logBox.removeChild(logBox.firstChild);
         }
       }
 
-      // 🔹 정말 맨 아래에 있을 때만 자동 스크롤
       if (autoScroll) {
         logBox.scrollTop = logBox.scrollHeight;
       }
 
-      // 통계 업데이트
       document.getElementById("total").textContent = data.length;
       document.getElementById("ping").textContent = data.filter(l => l.includes("Ping")).length;
       document.getElementById("port").textContent = data.filter(l => l.includes("Port")).length;
       document.getElementById("traffic").textContent = data.filter(l => l.includes("트래픽")).length;
 
-      // 상태 업데이트
       lastLogs = data;
 
     } catch (err) {
@@ -90,12 +137,80 @@
     }
   }
 
+  // 선택한 로그 AI 분석
+  async function analyzeSelectedLog() {
+    if (!selectedLog) return;
+
+    const box = document.getElementById("analysisBox");
+    box.textContent = "로그 분석 중...";
+
+    analyzeBtn.disabled = true;
+
+    try {
+      const res = await fetch("/api/analyze-log", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ line: selectedLog }),
+      });
+
+      const data = await res.json();
+      box.textContent = data.result || "분석 실패";
+
+    } catch (err) {
+      console.error("선택 로그 분석 실패:", err);
+      box.textContent = "오류 발생: 서버 연결 실패";
+    } finally {
+      analyzeBtn.disabled = false;
+    }
+  }
+
+  analyzeBtn.addEventListener("click", analyzeSelectedLog);
+
+  // 로그 주기적 갱신
   fetchLogs();
   setInterval(fetchLogs, 2000);
+
+ // 🔥 로그 Clear 기능
+  document.getElementById("clearBtn").addEventListener("click", async () => {
+    if (!confirm("로그를 모두 삭제할까요?")) return;
+
+    try {
+      const res = await fetch("/api/clear-logs", {
+        method: "POST"
+      });
+
+      if (!res.ok) {
+        // 상태코드 200이 아니면 에러 처리
+        const text = await res.text();
+        console.error("clear-logs 응답 에러:", res.status, text);
+        alert("서버에서 에러 응답을 반환했습니다.");
+        return;
+      }
+
+      const result = await res.json();
+
+      if (result.status === "ok") {
+        // UI 로그 비우기
+        logBox.innerHTML = "";
+        lastLogs = [];
+
+        // 통계 리셋
+        document.getElementById("total").textContent = 0;
+        document.getElementById("ping").textContent = 0;
+        document.getElementById("port").textContent = 0;
+        document.getElementById("traffic").textContent = 0;
+
+        alert("로그가 초기화되었습니다!");
+      } else {
+        alert("오류 발생: " + result.message);
+      }
+    } catch (err) {
+      console.error("clear-logs 요청 실패:", err);
+      alert("서버 오류로 초기화 실패");
+    }
+  });
+
 </script>
-
-
-
 
 </body>
 </html>
